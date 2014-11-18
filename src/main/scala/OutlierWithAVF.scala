@@ -28,7 +28,7 @@ import com.google.common.hash._
 
 class OutlierWithAVFModel private (
    val score:  RDD[(String,Int)],
-   val trimmed_data:  RDD[Vector[String]] )
+   val trimedData:  RDD[Vector[String]] )
 
 /**
  * Top-level methods for OutlierWithAVF.
@@ -40,43 +40,41 @@ object OutlierWithAVFModel {
    * each feature in that data-point. Low score data-points are outliers.
    *
    * @param input RDD of Vector[String] where feature values are comma separated .
-   * @param hash_seed which is the hash-function to be used for representing data-points
+   * @param hashSeed which is the hash-function to be used for representing data-points
    * @param sc is the Spark Context of the calling function
    * @return a RDD of hash-key and score.
    */
-  def compute(input: RDD[Vector[String]],
-              hash_seed : HashFunction,
-              sc : SparkContext) : RDD[(String,Int)] =  {
+  def computeScores(input: RDD[Vector[String]],
+                    hashSeed : HashFunction,
+                    sc : SparkContext) : RDD[(String,Int)] =  {
 
-    //obtain the no.of features of each data-point
+    //obtain the no.of features of each indexedInput-point
     val counter = input.first().length
-    var i = -1L
+    val x = new Array[Int](counter)
+    for(i <- 0 to counter-1) x(i) = i
 
     // key,value pairs for < (column_no,attribute value) , "frequency">
-    val rdd1 = input.flatMap(line => line.toSeq)
-      .map(word => {
-      i+=1; (i%counter, word)
-    } -> 1)
+    val freq = input.map(word => word.zip(x))
+      .flatMap(line => line.toSeq)
+      .map(word => word->1)
       .reduceByKey(_+_)
       .cache()
 
-    // key,value pairs for < (column_no,attribute value) , "data-point number">
-    val len = sc.parallelize(1L to input.count)
-    val data = len.zip(input)
-    var j = -1L
-    val rdd2 = data.map(word => word._2
-      .map(w =>  hash_seed.hashLong(word._1)
-      .toString() -> w))
-      .flatMap(word => word.toSeq)
-      .map(word => ({j += 1; (j%counter,word._2)}) -> word._1).cache
+    // key,value pairs for < (column_no,attribute value) , "indexedInput-point number">
+    val line = sc.parallelize(1L to input.count)
+    val indexedInput = line.zip(input)
 
-    //join the two RDDs and get the frequency for each attribute in a data point
-    val rdd_joined = rdd2.join(rdd1)
+    val data = indexedInput.map(word => word._2.zip(x)
+      .map(w =>  w-> hashSeed.hashLong(word._1).toString))
+      .flatMap(line => line.toSeq)
+
+    //join the two RDDs and get the frequency for each attribute in a indexedInput point
+    val scores = data.join(freq)
       .flatMap(line => Seq(line.swap._1))
       .reduceByKey(_+_)
-      .map(word => ((word._1),word._2))
+      .map(word => (word._1,word._2))
 
-    rdd_joined//.saveAsTextFile("/home/ashu/Desktop/joined")
+    scores
   }
 
   /**
@@ -85,44 +83,42 @@ object OutlierWithAVFModel {
    * trimmed data-set
    *
    * @param input RDD of Vector[String]
-   * @param score_RDD of type (String, Int) having AVF score of the data-point obtained from 
+   * @param score of type (String, Int) having AVF score of the data-point obtained from 
    * function compute
    * @param percent of type Double which is the percentage of outliers to be removed from the 
    * data-set
-   * @param hash_seed is the Hash-Function for uniquely identifying each data-point
+   * @param hashSeed is the Hash-Function for uniquely identifying each data-point
    *
    * @return main.scala.OutlierWithAVFModel which has score RDD and trimmed data-set .
    */
 
-  def trimScores(
-                  input : RDD[Vector[String]],
-                  score_RDD : RDD[(String,Int)],
-                  percent : Double,
-                  hash_seed : HashFunction,
-                  sc : SparkContext) : OutlierWithAVFModel = {
+  def trimScores(input : RDD[Vector[String]],
+                 score : RDD[(String,Int)],
+                 percent : Double,
+                 hashSeed : HashFunction,
+                 sc : SparkContext) : OutlierWithAVFModel = {
 
-    val nexample = score_RDD.count()
-    val nremove =  (nexample * percent*0.01)
+    val nexample = score.count()
+    val nremove =  nexample * percent*0.01
 
     //sorted scores
-    val sort_score = score_RDD.map(word => (word._2,word._1))
+    val sortedScore = score.map(word => (word._2,word._1))
       .sortByKey(true)
       .map(word => (word._2,word._1))
 
     //trimmed score RDD
-    val data_trim = sort_score.zipWithIndex
+    val trimmedData = sortedScore.zipWithIndex()
       .filter(word=> word._2 < nremove.toLong)
-      .map(word => word._1).collect.toMap
+      .map(word => word._1).collect().toMap
 
-    //filtered dataset  
-    val alter_data = sc.parallelize(1L to input.count)
+    //filtered data-set
+    val alteredData = sc.parallelize(1L to input.count)
       .zip(input)
-      .map(word => hash_seed.hashLong(word._1).toString() -> word._2)
-      .filter(line => !(data_trim.get(line._1).nonEmpty))
+      .map(word => hashSeed.hashLong(word._1).toString -> word._2)
+      .filter(line => !trimmedData.get(line._1).nonEmpty)
       .map(v => v._2)
 
-
-    new OutlierWithAVFModel(score_RDD, alter_data)
+    new OutlierWithAVFModel(score, alteredData)
 
   }
 
@@ -144,14 +140,13 @@ object OutlierWithAVFModel {
     }
 
     // define a hash-function of type murmur3-128bits with seed_value of '5'
-    val hash_seed = Hashing.murmur3_128(5)
-
+    val hashSeed = Hashing.murmur3_128(5)
 
     //compute the AVF scores for each data-point
-    val score_RDD = OutlierWithAVFModel.compute(data,hash_seed,sc)
+    val scores = OutlierWithAVFModel.computeScores(data,hashSeed,sc)
 
     //returns an instance of main.scala.OutlierWithAVFModel
-    val model = OutlierWithAVFModel.trimScores(data, score_RDD, percent,hash_seed,sc)
+    val model = OutlierWithAVFModel.trimScores(data, scores, percent,hashSeed,sc)
 
     model
 
