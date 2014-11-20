@@ -48,13 +48,8 @@ object OutlierWithAVFModel {
                     hashSeed : HashFunction,
                     sc : SparkContext) : RDD[(String,Int)] =  {
 
-    //obtain the no.of features of each indexedInput-point
-    val counter = input.first().length
-    val x = new Array[Int](counter)
-    for(i <- 0 to counter-1) x(i) = i
-
     // key,value pairs for < (column_no,attribute value) , "frequency">
-    val freq = input.map(word => word.zip(x))
+    val freq = input.map(word => word.zipWithIndex)
       .flatMap(line => line.toSeq)
       .map(word => word->1)
       .reduceByKey(_+_)
@@ -64,7 +59,7 @@ object OutlierWithAVFModel {
     val line = sc.parallelize(1L to input.count)
     val indexedInput = line.zip(input)
 
-    val data = indexedInput.map(word => word._2.zip(x)
+    val data = indexedInput.map(word => word._2.zipWithIndex
       .map(w =>  w-> hashSeed.hashLong(word._1).toString))
       .flatMap(line => line.toSeq)
 
