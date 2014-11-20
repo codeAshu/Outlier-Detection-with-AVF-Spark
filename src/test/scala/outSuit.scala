@@ -8,27 +8,37 @@ import org.apache.spark.rdd.RDD
 
 import org.scalatest.{BeforeAndAfterEach, FunSuite}
 
-class outSuit extends FunSuite with LocalSparkContext {
+class outSuit extends FunSuite with BeforeAndAfterEach with LocalSparkContext {
 
+  var vectors: Vector[Vector[String]] = _
+  var data: RDD[Vector[String]] = _
 
-  /*test("percentage should be less then 100") {
-    val percent = 102
+  override def beforeEach() {
 
-    val m = OutlierWithAVFModel.outliers(data,percent,sc)
-    assert(System.exit(1) == true)
+    vectors = Vector(
+      Vector("A", "B"),
+      Vector("A", "C"),
+      Vector("A", "D"),
+      Vector("E", "B")
+    )
+    data = sc.parallelize(vectors, 2)
   }
-*/
-  test("parameter validation") {
-       intercept[IllegalArgumentException] {
-         val v = Vector(Vector("x","y","z"), Vector("m","n"))
-         val p = sc.parallelize(v)
-         val data = p
-         val percent = 102
-         val app = OutlierWithAVFModel.outliers(data,percent,sc)
+    test("only two outliers should be removed"){
+      val model = OutlierWithAVFModel.outliers(data,30,sc)
+      assert(model.trimedData.count() == 3)
 
     }
+    test("No outlier should be removed"){
+      val model = OutlierWithAVFModel.outliers(data,0,sc)
+      assert(model.trimedData.count() == 4)
+    }
+
+  test("4 entries in score RDD") {
+    val model = OutlierWithAVFModel.outliers(data, 30, sc)
+    assert(model.score.count() == 4)
+
   }
 
 
 
-}
+  }
