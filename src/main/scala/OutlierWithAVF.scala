@@ -56,10 +56,8 @@ object OutlierWithAVFModel {
       .cache()
 
     // key,value pairs for < (column_no,attribute value) , "indexedInput-point number">
-    val line = sc.parallelize(1L to input.count)
-    val indexedInput = line.zip(input)
-
-    val data = indexedInput.map(word => word._2.zipWithIndex
+    val data = input.zipWithIndex().map(word => (word._2,word._1))
+      .map(word => word._2.zipWithIndex
       .map(w =>  w-> hashSeed.hashLong(word._1).toString))
       .flatMap(line => line.toSeq)
 
@@ -107,8 +105,8 @@ object OutlierWithAVFModel {
       .map(word => word._1).collect().toMap
 
     //filtered data-set
-    val alteredData = sc.parallelize(1L to input.count)
-      .zip(input)
+    val alteredData = input.zipWithIndex()
+      .map(word => (word._2,word._1))
       .map(word => hashSeed.hashLong(word._1).toString -> word._2)
       .filter(line => !trimmedData.get(line._1).nonEmpty)
       .map(v => v._2)
