@@ -35,7 +35,7 @@
       }
       test("No outlier should be removed"){
         val model = OutlierWithAVFModel.outliers(data,0,sc)
-        assert(model.trimedData.count() === 4)
+        assert(model.trimedData.count() == 4)
       }
 
       test("4 entries in score RDD") {
